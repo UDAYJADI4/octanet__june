@@ -1,0 +1,125 @@
+pragma solidity 0.8.0;
+
+contract multiSigWallet{
+    
+    //This contract is a multisignature wallet requiring 2/3 signatures to execute a transaction.
+
+  uint private TotalBalance;
+
+  //Owners
+  address private Owner1 = address(0);
+  address private Owner2 = address(0);
+  address private Owner3 = address(0);
+
+  //Transaction Struct
+  struct Atransaction {
+    address payable recipient;
+    uint amount;
+    address initiator;
+    bool signature1;
+    address countersigner;
+    bool signature2;
+    bool status; //True is a completed-executed transaction, False is a pending transaciton.
+  }
+
+  //Array to log transactions
+  Atransaction[] private TransactionLog;
+
+  //Constructor
+  constructor() {
+    Owner1 = msg.sender;
+  }
+
+  //Modifiers
+  modifier OnlyAnOwner() {
+    require(msg.sender == Owner1 || msg.sender == Owner2 || msg.sender == Owner3, "You are not a Wallet Owner!");
+    _; //run function
+  }
+
+  //OneTime Function
+  function SetOtherOwners(address _Owner2, address _Owner3) public {
+    require(msg.sender == Owner1, "You are not the wallet initiator!, You do not have access to define other wallet owners");
+    require(Owner2 == address(0) && Owner3 == address(0), "Wallet Owners are already defined.");
+    Owner2 = _Owner2;
+    Owner3 = _Owner3;
+  }
+
+  //Events
+  event depositDone(address indexed depositedBy, uint ammount);
+  event TransactionStarted(address indexed intiator, address indexed recipient, uint amount);
+  event signatureDone(uint indexed transaction, address indexed Signatore, bool approval);
+  event transactionDone(uint index, address indexed recipient, uint amount);
+
+  //Functions
+  function getATransaction(uint index) public view OnlyAnOwner returns(Atransaction memory){
+    return (TransactionLog[index]);
+  }
+
+  function SignATransaction(uint index, bool approval, bool send) public OnlyAnOwner {
+      //Checks
+    require(TransactionLog[index].status != true, "This transaction is already completed-executed.");
+    require(msg.sender != TransactionLog[index].initiator,"You are the transaction initiator!, another owner must countersign");
+    
+    //Update Signatures
+    TransactionLog[index].countersigner = msg.sender;
+    TransactionLog[index].signature2 = approval;
+
+    emit signatureDone(index, msg.sender, approval);
+    
+    //If signer chose to execute transaction execute it.
+    if (send) {
+      ExecuteTransaction(index);
+    }
+  }
+
+  function InitializeTransaction(address payable _recipient, uint _amount) public OnlyAnOwner {
+    Atransaction memory newTransaction;
+    newTransaction.recipient = _recipient;
+    newTransaction.amount = _amount;
+    newTransaction.initiator = msg.sender;
+    newTransaction.signature1 = true;
+    newTransaction.countersigner = address(0);
+    newTransaction.signature2 = false;
+    newTransaction.status = false;
+
+    insertTransaction(newTransaction);
+    emit TransactionStarted(msg.sender, _recipient, _amount);
+  }
+
+  function insertTransaction (Atransaction memory newTransaction) private {
+    TransactionLog.push(newTransaction);
+  }
+
+  function ExecuteTransaction(uint index) public payable OnlyAnOwner{
+    //Checks
+    require(TransactionLog[index].status != true, "This transaction is already completed-executed. Initialize a new transaction if required.");
+    require(TransactionLog[index].signature1 == true && TransactionLog[index].signature2 == true, "Not enough Signatures!" );
+    require(TotalBalance >= TransactionLog[index].amount, "Not sufficient funds");
+    
+    
+    //Transfer and Balance Update
+    TransactionLog[index].recipient.transfer(TransactionLog[index].amount);
+    TotalBalance -= TransactionLog[index].amount;
+    
+    //Transaction Object Update
+    TransactionLog[index].status = true;
+    
+    emit transactionDone(index,TransactionLog[index].recipient, TransactionLog[index].amount);
+  }
+
+  function deposit() public payable returns(uint) {
+    TotalBalance += msg.value;
+    emit depositDone(msg.sender, msg.value);
+    return TotalBalance;
+  }
+
+
+  function getOwners() public view OnlyAnOwner returns(address, address, address){
+    return (Owner1, Owner2, Owner3);
+  }
+
+  function getWalletBalance() public view returns(uint){
+    return TotalBalance;
+  }
+
+}
